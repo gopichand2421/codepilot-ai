@@ -1,0 +1,80 @@
+version: '3.8'
+
+services:
+  # 1. MongoDB with Replica Set (Auto-Bootstrapped)
+  mongodb:
+    image: mongo:latest
+    container_name: codepilot-mongo
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo_data:/data/db
+    command: ["mongod", "--replSet", "rs0", "--bind_ip_all"]
+    healthcheck:
+      test: echo 'db.runCommand("ping").ok' | mongo localhost:27017/test --quiet
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Setup Container to initialize Mongo Replica Set for Transactions
+  mongo-init:
+    image: mongo:latest
+    container_name: codepilot-mongo-init
+    depends_on:
+      mongodb:
+        condition: service_healthy
+    command: >
+      bash -c "mongosh --host mongodb:27017 --eval 'rs.initiate({_id: "rs0", members: [{_id: 0, host: "mongodb:27017"}]})'"
+
+  # 2. Redis Cache
+  redis:
+    image: redis:7.2-alpine
+    container_name: codepilot-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  # 3. Qdrant Vector DB
+  qdrant:
+    image: qdrant/qdrant:v1.9.0
+    container_name: codepilot-qdrant
+    ports:
+      - "6333:6333"
+      - "6334:6334"
+    volumes:
+      - qdrant_data:/qdrant/storage
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:6333/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  # 4. Ollama Local LLM Engine (CUDA GPU-Accelerated Template)
+  ollama:
+    image: ollama/ollama:latest
+    container_name: codepilot-ollama
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    # To enable local GPU acceleration (NVIDIA), uncomment the block below:
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: all
+    #           capabilities: [gpu]
+
+volumes:
+  mongo_data:
+  redis_data:
+  qdrant_data:
+  ollama_data:
